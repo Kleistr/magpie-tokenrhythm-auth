@@ -199,8 +199,10 @@ export function mapUsage(wallet: any) {
     windows: [
       {
         name: "余额",
-        aside: true,
-        display: `余额 ¥${total.toFixed(2)} · 赠送 ¥${gift.toFixed(2)} · 充值 ¥${recharge.toFixed(2)}`,
+        used: 0,
+        balance: total,
+        unit: "CNY",
+        display: `赠送 ¥${gift.toFixed(2)} · 充值 ¥${recharge.toFixed(2)}`,
       },
     ],
   }

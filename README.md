@@ -40,8 +40,12 @@ magpie provider test tokenrhythm       # ✓ chat · ✓ decide
 
 ```
 $ magpie quota
-tokenrhythm · API key …Sf4g  subscription  余额 余额 ¥30.15 · 赠送 ¥20.15 · 充值 ¥10.00  ¥30.15 left
+tokenrhythm · API key …Sf4g  subscription  余额 130.15 CNY left  ¥130.15 left
 ```
+
+余额窗口带 `balance`（单位 CNY）和 `used: 0`，这是**必要的**：magpie 把「全部窗口都是
+`aside` 或纯文本」的账号判为**额度未知**，路由排序时和未知额度的成员同组，会排到已知额度
+的成员之后。带上真实的 `balance` 后 magpie 按钱包对待它，余额为 0 时才会判为已用尽。
 
 会话令牌存在 `plugin-auth.json` 的 `metadata.session` 里；它和网页登录同寿命，过期后余额报
 「会话令牌可能已过期」，重新登录即可。留空则不显示余额，对话不受影响。

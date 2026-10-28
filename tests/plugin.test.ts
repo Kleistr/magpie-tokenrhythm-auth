@@ -236,22 +236,24 @@ describe("mapUsage (the wallet summary)", () => {
     assert.equal(u.balance, "¥30.15")
   })
 
-  it("splits the balance into gift and recharge in its display line", () => {
+  it("tells the gift and recharge split beside the amount magpie shows", () => {
     const u = _internal.mapUsage(wallet)
-    assert.match(u.windows[0].display, /余额 ¥30\.15/)
     assert.match(u.windows[0].display, /赠送 ¥20\.15/)
     assert.match(u.windows[0].display, /充值 ¥10\.00/)
   })
 
-  it("gives no used/limit pair: a prepaid balance has no window to measure", () => {
+  it("reports the balance as the window's own, in CNY, so magpie reads it as a wallet", () => {
     const w = _internal.mapUsage(wallet).windows[0]
-    assert.equal(w.used, undefined)
-    assert.equal(w.limit, undefined)
+    assert.equal(w.balance, 30.1538862)
+    assert.equal(w.unit, "CNY")
+    assert.equal(w.used, 0)
   })
 
-  it("is a balance the account still spends, so the window is aside", () => {
-    const u = _internal.mapUsage(wallet)
-    assert.equal(u.windows[0].aside, true)
+  it("is not set aside: an aside window makes magpie call the allowance unknown", () => {
+    // magpie's allowanceOf() keeps no aside/text window, so routedAllowance
+    // says "not known" and the provider sorts with the unknown ones
+    const w = _internal.mapUsage(wallet).windows[0]
+    assert.equal(w.aside, undefined)
   })
 
   it("returns an error line when the wallet call fails", () => {
