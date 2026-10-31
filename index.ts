@@ -185,12 +185,32 @@ export function authedFetch(key: string, inner: typeof fetch = fetch): typeof fe
 /**
  * TokenRhythm's wallet summary (GET /api/wallet/summary, a web-session
  * endpoint) as magpie's usage: a prepaid balance the account spends, not
- * a window that resets — hence aside, with the gift/recharge split shown.
+ * a window that resets — hence a wallet window with its balance, and the
+ * gift/recharge split in its text.
+ *
+ * Errors are one short sentence: magpie puts them on the card as
+ * 「暂时无法获取额度：<first line>」, so the vendor's own wording and a
+ * parenthetical would only make it longer. An expired session is the one
+ * the user can act on; everything else is transient and retried.
  */
-export function mapUsage(wallet: any) {
+export function mapUsage(wallet: any, failure?: unknown, status?: number) {
+  if (failure !== undefined) {
+    return { error: "余额读取失败，稍后自动重试", windows: [] }
+  }
   const d = wallet?.data
   if (wallet?.code !== 0 || !d) {
-    return { error: `TokenRhythm: ${wallet?.message ?? "无法读取钱包"}（会话令牌可能已过期）`, windows: [] }
+    const code = wallet?.code
+    const lapsed =
+      code === "UNAUTHORIZED" ||
+      code === 401 ||
+      status === 401 ||
+      /未认证|登录已过期/.test(String(wallet?.message ?? ""))
+    return {
+      error: lapsed
+        ? "登录已过期，重新登录后继续显示余额"
+        : `余额接口异常${status ? `（HTTP ${status}）` : ""}，稍后自动重试`,
+      windows: [],
+    }
   }
   const cny = (v: any) => Number.parseFloat(v ?? "0")
   const total = cny(d.availableBalanceCny)
@@ -228,12 +248,6 @@ export async function localIcon(rel = "./assets/icon.png"): Promise<string> {
   }
 }
 
-/**
- * What sign-in asks before the key: whether the balance is wanted at all,
- * then the web session that alone can read it. Answering "不显示" keeps the
- * account free of a cookie that expires; answering "显示" stores it and
- * magpie shows the balance until the session ends.
- */
 export function loginPrompts() {
   return [
     {
@@ -359,9 +373,9 @@ export const TokenRhythmAuthPlugin = async () => ({
         // An expired web session only costs the balance card: signIn
         // "kept" tells magpie not to mark the API key account as expired
         // (its key still answers every request).
-        return { ...mapUsage(wallet), signIn: "kept" }
-      } catch {
-        return { error: "TokenRhythm: 钱包接口无法访问", windows: [], signIn: "kept" }
+        return { ...mapUsage(wallet, undefined, res.status), signIn: "kept" }
+      } catch (e) {
+        return { ...mapUsage(undefined, e), signIn: "kept" }
       }
     },
   },

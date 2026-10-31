@@ -257,10 +257,34 @@ describe("mapUsage (the wallet summary)", () => {
     assert.equal(w.aside, undefined)
   })
 
-  it("returns an error line when the wallet call fails", () => {
+  it("says a lapsed session is a lapsed session, and how to fix it", () => {
     const u = _internal.mapUsage({ code: "UNAUTHORIZED", message: "未认证或登录已过期" })
-    assert.ok(u.error.includes("会话"))
+    assert.match(u.error, /登录已过期/)
+    assert.match(u.error, /重新登录/)
     assert.deepEqual(u.windows, [])
+  })
+
+  it("keeps the card's words short: magpie adds 「暂时无法获取额度：」 itself", () => {
+    for (const e of [
+      _internal.mapUsage({ code: "UNAUTHORIZED", message: "未认证或登录已过期" }).error,
+      _internal.mapUsage({}, undefined, 500).error,
+      _internal.mapUsage(undefined, new Error("boom")).error,
+    ]) {
+      assert.ok(e.length <= 60, e)
+      assert.ok(!e.startsWith("TokenRhythm:"), e)
+      assert.ok(!e.includes("会话令牌"), e)
+    }
+  })
+
+  it("treats a network failure as transient, not as a lapsed session", () => {
+    const e = _internal.mapUsage(undefined, new Error("fetch failed")).error
+    assert.match(e, /稍后/)
+    assert.ok(!/登录已过期/.test(e))
+  })
+
+  it("names the status code when the wallet endpoint fails", () => {
+    const e = _internal.mapUsage({}, undefined, 503).error
+    assert.match(e, /503/)
   })
 })
 
