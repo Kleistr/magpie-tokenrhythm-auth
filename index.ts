@@ -14,6 +14,8 @@
 //
 // Everything testable lives on the `_internal` export.
 
+import { execFileSync } from "node:child_process"
+
 const PROVIDER = "tokenrhythm"
 const BASE = "https://tokenrhythm.studio/v1"
 const VERSION = "0.0.1"
@@ -199,7 +201,6 @@ export function mapUsage(wallet: any) {
     windows: [
       {
         name: "余额",
-        used: 0,
         balance: total,
         unit: "CNY",
         display: `赠送 ¥${gift.toFixed(2)} · 充值 ¥${recharge.toFixed(2)}`,
@@ -227,6 +228,93 @@ export async function localIcon(rel = "./assets/icon.png"): Promise<string> {
   }
 }
 
+/**
+ * What sign-in asks before the key: whether the balance is wanted at all,
+ * then the web session that alone can read it. Answering "不显示" keeps the
+ * account free of a cookie that expires; answering "显示" stores it and
+ * magpie shows the balance until the session ends.
+ */
+export function loginPrompts() {
+  return [
+    {
+      type: "select",
+      key: "balance",
+      message: "显示余额（需要网页会话令牌）",
+      options: [
+        { label: "显示", value: "on", hint: "从浏览器取 tr_session" },
+        { label: "不显示", value: "off", hint: "只用 API key，余额未知" },
+      ],
+    },
+    {
+      type: "password",
+      key: "session",
+      message: "会话令牌 tr_session（在浏览器复制后直接回车 = 用剪贴板）",
+      placeholder: "sess_…（tokenrhythm.studio 的 tr_session cookie）",
+      when: { key: "balance", op: "eq", value: "on" },
+      validate: (v: string) => (v === "" || /^sess_\S+$/.test(v.trim()) ? undefined : "以 sess_ 开头"),
+    },
+  ]
+}
+
+/** What the browser copied last, "" where there is no clipboard to read. */
+export function readClipboard(): string {
+  try {
+    const cmd =
+      process.platform === "darwin"
+        ? ["pbpaste", []]
+        : process.platform === "win32"
+          ? ["powershell", ["-NoProfile", "-Command", "Get-Clipboard"]]
+          : ["sh", ["-c", "command -v wl-paste >/dev/null && wl-paste -n || xclip -selection clipboard -o 2>/dev/null"]]
+    return String(execFileSync(cmd[0] as string, cmd[1] as string[], { timeout: 1500, encoding: "utf8" }))
+  } catch {
+    return ""
+  }
+}
+
+/** The wallet summary's URL: a web-session endpoint, not part of /v1. */
+export const WALLET_URL = "https://tokenrhythm.studio/api/wallet/summary"
+
+/**
+ * magpie calls this before it stores a sign-in (auth.methods[].authorize):
+ * a key the vendor refuses, or a session that can no longer read the
+ * wallet, fails here with why instead of being kept to fail quietly.
+ */
+export async function authorizeLogin(
+  inputs: any,
+  http: typeof fetch = fetch,
+  clipboard: () => string = readClipboard,
+): Promise<any> {
+  // magpie hands this the prompts' answers only; the API key is its own
+  // to store (host.js apiKey → save), so there is none to check here.
+  let session = String(inputs?.session ?? "").trim()
+  if (inputs?.balance === "off") return { type: "success" }
+  // Nothing typed: take what the browser just copied (the prompt says so).
+  if (!session) {
+    const pasted = clipboard().trim()
+    if (!/^sess_\S+$/.test(pasted)) {
+      return {
+        type: "failed",
+        error: "剪贴板里没有 tr_session：到 tokenrhythm.studio/account 复制会话令牌后再试，或上一步选「不显示」",
+      }
+    }
+    session = pasted
+  }
+
+  try {
+    const res = await http(WALLET_URL, { headers: { accept: "*/*", cookie: `tr_session=${session}` } })
+    const wallet = await res.json()
+    if (wallet?.code !== 0) {
+      return {
+        type: "failed",
+        error: "会话令牌无效或已过期：到 tokenrhythm.studio/account 重新登录后取新的 tr_session，或上一步选「不显示」",
+      }
+    }
+  } catch {
+    return { type: "failed", error: "读取钱包失败，检查网络或代理后再试" }
+  }
+  return { type: "success", metadata: { session } }
+}
+
 export const TokenRhythmAuthPlugin = async () => ({
   async config(cfg: any) {
     cfg.provider ??= {}
@@ -244,16 +332,12 @@ export const TokenRhythmAuthPlugin = async () => ({
         placeholder: "sk_tr_…",
         // The balance lives behind the web session, not the API key:
         // https://tokenrhythm.studio/account → 网络 → tr_session cookie.
-        prompts: [
-          {
-            type: "password",
-            key: "session",
-            message: "会话令牌（可选，用于显示余额）",
-            placeholder: "sess_…（tokenrhythm.studio 的 tr_session cookie）",
-            validate: (v: string) =>
-              v === "" || /^sess_\S+$/.test(v.trim()) ? undefined : "以 sess_ 开头",
-          },
-        ],
+        // Re-login (magpie plugin login tokenrhythm) asks these again and,
+        // the key unchanged, replaces this account's session.
+        prompts: loginPrompts(),
+        // Checked before the account is stored: a mistyped or expired
+        // session is refused with why, not kept to fail quietly later.
+        authorize: authorizeLogin,
       },
     ],
     async loader(getAuth: () => Promise<any>) {
@@ -268,13 +352,16 @@ export const TokenRhythmAuthPlugin = async () => ({
       const session = auth?.metadata?.session
       if (!session) return {}
       try {
-        const res = await fetch("https://tokenrhythm.studio/api/wallet/summary", {
+        const res = await fetch(WALLET_URL, {
           headers: { accept: "*/*", cookie: `tr_session=${session}` },
         })
         const wallet = await res.json()
-        return mapUsage(wallet)
+        // An expired web session only costs the balance card: signIn
+        // "kept" tells magpie not to mark the API key account as expired
+        // (its key still answers every request).
+        return { ...mapUsage(wallet), signIn: "kept" }
       } catch {
-        return { error: "TokenRhythm: 钱包接口无法访问", windows: [] }
+        return { error: "TokenRhythm: 钱包接口无法访问", windows: [], signIn: "kept" }
       }
     },
   },
@@ -307,5 +394,7 @@ export const _internal = {
   adaptSystemOneBody,
   authedFetch,
   localIcon,
+  loginPrompts,
+  authorizeLogin,
   fallbackProviderConfig: () => FALLBACK_PROVIDER_CONFIG,
 }

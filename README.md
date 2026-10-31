@@ -29,6 +29,31 @@ magpie provider test tokenrhythm       # ✓ chat · ✓ decide
 | 余额 | 可选：登录时填会话令牌，`magpie quota` 显示可用 / 赠送 / 充值余额（见下） |
 | JEV 决策 | `NeoHorse-Jev-4B` 声明为 System One 决策模型（`decide: true`），magpie 在 `{BASE}/systemone` 向它提问 |
 
+### 令牌过期了怎么办
+
+**只影响余额卡片，不影响对话**：会话令牌（`tr_session`）过期后，`magpie quota` 和账号卡片会显示
+「会话令牌可能已过期」，但 API key 仍然正常发请求——插件在用量错误里带 `signIn: "kept"`，
+magpie 不会因此把账号标记成失效。
+
+重新填写（同一个 API key，会**替换**这个账号的会话，不会多出账号）：
+
+```bash
+magpie plugin login tokenrhythm
+# 1. 选「显示」
+# 2. 会话令牌：在浏览器复制后直接回车 —— 插件从剪贴板读
+# 3. 粘贴 API key
+```
+
+浏览器取令牌的步骤：打开 <https://tokenrhythm.studio/account> 并登录 → 开发者工具 →
+应用 / 存储 → Cookie → 复制 `tr_session` 的值（`sess_…`）。
+
+这个 cookie 是 **httpOnly** 的（网页 JS 读不到，控制台里 `document.cookie` 取不出来），
+所以只能从开发者工具或浏览器的 cookie 存储里拿。插件也**没有**做「自动读浏览器 cookie 数据库」：
+那需要钥匙串授权或完全磁盘访问权限，跨浏览器且容易失效，不适合放进插件。
+
+登录时会先校验会话：过期或填错会当场报「会话令牌无效或已过期」，不会悄悄存下一个坏令牌。
+不想维护这个令牌，就在第一步选「不显示」——对话照常，只是余额未知。
+
 ### 显示余额
 
 余额接口 `GET /api/wallet/summary` 只认网页登录的 session，**API key 调不通**（401）。
@@ -36,7 +61,8 @@ magpie provider test tokenrhythm       # ✓ chat · ✓ decide
 
 1. 浏览器打开 <https://tokenrhythm.studio/account> 并登录；
 2. 开发者工具 → 应用 / 存储 → Cookie → 复制 `tr_session` 的值（`sess_…`）；
-3. 重新 `magpie plugin login tokenrhythm`，按提示先填会话令牌、再填 API key。
+3. 重新 `magpie plugin login tokenrhythm`：先选「显示」，会话令牌处**直接回车**用剪贴板，
+   再填 API key。
 
 ```
 $ magpie quota
@@ -103,7 +129,7 @@ fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n")'
 ## 开发
 
 ```bash
-npm test        # node --test tests/plugin.test.ts（24 个测试，不联网）
+npm test        # node --test tests/plugin.test.ts（31 个测试，不联网）
 ```
 
 `index.ts` 顶部导出 `_internal`（`mapModels`、`adaptSystemOneBody`、`authedFetch` 等）供测试使用；

@@ -246,7 +246,8 @@ describe("mapUsage (the wallet summary)", () => {
     const w = _internal.mapUsage(wallet).windows[0]
     assert.equal(w.balance, 30.1538862)
     assert.equal(w.unit, "CNY")
-    assert.equal(w.used, 0)
+    // the plugin docs say a wallet's window tells balance alone, no used
+    assert.equal(w.used, undefined)
   })
 
   it("is not set aside: an aside window makes magpie call the allowance unknown", () => {
@@ -274,5 +275,71 @@ describe("local icon", () => {
 
   it("gives an empty icon when the file is missing, rather than throwing", async () => {
     assert.equal(await _internal.localIcon("./does-not-exist.png"), "")
+  })
+})
+
+describe("login prompts", () => {
+  const prompts = _internal.loginPrompts()
+
+  it("asks whether to show the balance at all, so the session can be skipped", () => {
+    const sel = prompts[0]
+    assert.equal(sel.type, "select")
+    assert.equal(sel.key, "balance")
+    assert.deepEqual(
+      sel.options.map((o: any) => o.value),
+      ["on", "off"],
+    )
+  })
+
+  it("asks for the session token only when the balance is wanted", () => {
+    const s = prompts[1]
+    assert.equal(s.type, "password")
+    assert.equal(s.key, "session")
+    assert.deepEqual(s.when, { key: "balance", op: "eq", value: "on" })
+  })
+})
+
+describe("authorizeLogin (checked at sign-in)", () => {
+  const ok = (body: any) =>
+    new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } })
+
+  it("accepts a session the wallet answers", async () => {
+    const fakeFetch = async () => ok({ code: 0, data: { availableBalanceCny: "1.00" } })
+    const out = await _internal.authorizeLogin({ session: "sess_y" }, fakeFetch as any)
+    assert.equal(out.type, "success")
+    assert.equal(out.metadata.session, "sess_y")
+  })
+
+  it("refuses an expired session instead of storing it silently", async () => {
+    const fakeFetch = async () =>
+      new Response(JSON.stringify({ code: "UNAUTHORIZED", message: "未认证或登录已过期" }), { status: 401 })
+    const out = await _internal.authorizeLogin({ session: "sess_old" }, fakeFetch as any)
+    assert.equal(out.type, "failed")
+    assert.match(out.error, /会话令牌/)
+  })
+
+  it("takes the session from the clipboard when none was typed", async () => {
+    const fakeFetch = async () => ok({ code: 0, data: { availableBalanceCny: "1.00" } })
+    const out = await _internal.authorizeLogin({ session: "" }, fakeFetch as any, () => "sess_from_clipboard")
+    assert.equal(out.type, "success")
+    assert.equal(out.metadata.session, "sess_from_clipboard")
+  })
+
+  it("says what to do when the clipboard holds no session", async () => {
+    const fakeFetch = async () => ok({ code: 0, data: {} })
+    const out = await _internal.authorizeLogin({ session: "" }, fakeFetch as any, () => "hello")
+    assert.equal(out.type, "failed")
+    assert.match(out.error, /剪贴板/)
+  })
+
+  it("needs no key and no session when the balance is not wanted", async () => {
+    let called = false
+    const fakeFetch = async () => {
+      called = true
+      return ok({})
+    }
+    const out = await _internal.authorizeLogin({ balance: "off" }, fakeFetch as any)
+    assert.equal(out.type, "success")
+    assert.equal(called, false)
   })
 })
