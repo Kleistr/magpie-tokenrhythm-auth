@@ -38,7 +38,19 @@ magpie provider test tokenrhythm       # ✓ chat · ✓ decide
 错误文案按 magpie 的卡片规则写成**一句短话**：它会在前面加「暂时无法获取额度：」，所以插件
 不再重复厂商原名和括号解释；网络失败与 5xx 说成「稍后自动重试」，只有登录过期才提示重新登录。
 
-重新填写（同一个 API key，会**替换**这个账号的会话，不会多出账号）：
+**只换会话令牌，不用重填 API key**（推荐）：
+
+```bash
+# 浏览器里复制 tr_session，然后：
+npm run session            # 从剪贴板读；有多个账号时加 --account 2
+npm run session -- sess_…  # 或直接把令牌给它
+npm run session -- --clear # 清除，余额卡片不再显示
+```
+
+它只改 `plugin-auth.json` 里这个账号的 `metadata.session`：API key 原样保留，先校验令牌能读钱包
+再写入（`--no-verify` 跳过校验），写入用 magpie 自己的锁和原子替换，magpie 立刻读到新值。
+
+也可以走完整的重新登录（会**替换**同一个 API key 的账号，不会多出账号）：
 
 ```bash
 magpie plugin login tokenrhythm
